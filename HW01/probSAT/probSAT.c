@@ -1,7 +1,5 @@
 /**
  * probSAT version SC13_v2
- * uses only break!
- * in case of 3-SAT implements pick and flip method without caching
  * Author: Adrian Balint
  */
 
@@ -17,6 +15,9 @@
 #include <float.h>
 #include <getopt.h>
 #include <signal.h>
+
+#include "rngctrl.h"
+#include "xoshiro256plus.h"
 
 #define MAXCLAUSELENGTH 10000 //maximum number of literals per clause //TODO: eliminate this limit
 #define STOREBLOCK  20000
@@ -63,6 +64,8 @@ int *whereFalse;
 unsigned short *numTrueLit;
 /*the number of clauses the variable i will make unsat if flipped*/
 int *breaks;
+/* the number of clauses the variable i will make sat if flipped*/
+int *makes;
 /** critVar[i]=j tells that for clause i the variable j is critically responsible for satisfying i.*/
 int *critVar;
 int bestVar;
@@ -70,9 +73,11 @@ int bestVar;
 /*----probSAT variables----*/
 /** Look-up table for the functions. The values are computed in the initProbSAT method.*/
 double *probsBreak;
+double *probsMake;
 /** contains the probabilities of the variables from an unsatisfied clause*/
 double *probs;
 double cb; //for break
+double cm = 0; // for make
 double eps = 1.0;
 int fct = 0; //function to use 0= poly 1=exp
 int caching = 0;
@@ -83,9 +88,10 @@ FILE *fp;
 char *fileName;
 /*---------*/
 
-/** Run time variables variables*/BIGINT seed;
-BIGINT maxTries = LLONG_MAX;
-BIGINT maxFlips = LLONG_MAX;
+/** Run time variables variables*/
+BIGINT seed;
+BIGINT maxTries = 1;
+BIGINT maxFlips = 300;
 BIGINT flip;
 float timeOut = FLT_MAX;
 int run = 1;
@@ -125,28 +131,16 @@ void printProbs() {
 
 void printSolverParameters() {
 	printf("\nc probSAT parameteres: \n");
-	printf("c %-20s: %-20s\n", "using:", "only break");
-	if (fct == 0)
-		printf("c %-20s: %-20s\n", "using:", "polynomial function");
-	else
-		printf("c %-20s: %-20s\n", "using:", "exponential function");
+	printf("c %-20s: %-20s\n", "using:", "polynomial function");
 
 	printf("c %-20s: %6.6f\n", "cb", cb);
-	if (fct == 0) { //poly
-		printf("c %-20s: %-20s\n", "function:", "probsBreak[break]*probsMake[make] = pow((eps + break), -cb);");
-		printf("c %-20s: %6.6f\n", "eps", eps);
-	} else { //exp
-		printf("c %-20s: %-20s\n", "function:", "probsBreak[break]*probsMake[make] = pow(cb, -break);");
-	}
-	if (caching)
-		printf("c %-20s: %-20s\n", "using:", "caching of break values");
-	else
-		printf("c %-20s: %-20s\n", "using:", "no caching of break values");
+    printf("c %-20s: %6.6f\n", "cm", cm);
+    printf("c %-20s: %-20s\n", "function:", "probsBreak[break]*probsMake[make] = pow(make, cm) * pow((eps + break), -cb);");
+    printf("c %-20s: %6.6f\n", "eps", eps);
 	//printProbs();
 	printf("\nc general parameteres: \n");
 	printf("c %-20s: %lli\n", "maxTries", maxTries);
 	printf("c %-20s: %lli\n", "maxFlips", maxFlips);
-	printf("c %-20s: %lli\n", "seed", seed);
 	printf("c %-20s: \n", "-->Starting solver");
 	fflush(stdout);
 }
@@ -185,6 +179,27 @@ static inline void allocateMemory() {
 	falseClause = (int*) malloc(sizeof(int) * (numClauses + 1));
 	whereFalse = (int*) malloc(sizeof(int) * (numClauses + 1));
 	numTrueLit = (unsigned short*) malloc(sizeof(unsigned short) * (numClauses + 1));
+}
+
+static inline void freeMemory() {
+    free(atom);
+    free(clause);
+    free(numOccurrence);
+    for (int i = 0; i < numLiterals + 1; i++) {
+        free(occurrence[i]);
+    }
+    free(occurrence);
+    free(critVar);
+
+    free(falseClause);
+    free(whereFalse);
+    free(numTrueLit);
+
+    free(probsBreak);
+    free(probsMake);
+    free(probs);
+    free(breaks);
+    free(makes);
 }
 
 static inline void parseFile() {
@@ -287,7 +302,6 @@ static inline void parseFile() {
 
 	for (i = 0; i < numLiterals + 1; i++) {
 		occurrence[i] = (int*) malloc(sizeof(int) * (numOccurrenceT[i] + 1));
-		occurrence[i][numOccurrenceT[i]] = 0; //sentinal at the end!
 		if (numOccurrenceT[i] > maxNumOccurences)
 			maxNumOccurences = numOccurrenceT[i];
 	}
@@ -302,6 +316,7 @@ static inline void parseFile() {
 	}
 	probs = (double*) malloc(sizeof(double) * (numVars + 1));
 	breaks = (int*) malloc(sizeof(int) * (numVars + 1));
+    makes = (int*) malloc(sizeof(int) * (numVars + 1));
 	free(numOccurrenceT);
 	fclose(fp);
 }
@@ -317,8 +332,9 @@ static inline void init() {
 	}
 
 	for (i = 1; i <= numVars; i++) {
-		atom[i] = rand() % 2;
+		atom[i] = rng_next_range(0, 1);
 		breaks[i] = 0;
+        makes[i] = 0;
 	}
 	//pass trough all clauses and apply the assignment previously generated
 	for (i = 1; i <= numClauses; i++) {
@@ -375,21 +391,36 @@ static inline void pickAndFlipNC() {
 	double sumProb = 0;
 	int xMakesSat = 0;
 	i = 0;
+    // iterate all literals in selected clause (0 means we have reached end of clause)
+    // literal is either variable or its negation
 	while ((lit = clause[rClause][i])) {
+        // how many breaks will flip of this literal cause
 		breaks[i] = 0;
 		//lit = clause[rClause][i];
 		//numOccurenceX = numOccurrence[numVars - lit]; //only the negated occurrence of lit will count for break
 		j=0;
+        // get occurrences of negation of this variable (lit) and iterate through all of them
+        // indices in occurrence are shifted by numVars (we cannot have negative indices for negated vars)
 		while ((tClause = occurrence[numVars - lit][j])){
+            // if this variable is the only one true in clause, then flip of this var would break this clause
 			if (numTrueLit[tClause] == 1)
 				breaks[i]++;
 			j++;
 		}
-		probs[i] = probsBreak[breaks[i]];
+        makes[i] = 0;
+        j=0;
+        // get occurrences of this variable and iterate through all of them - only non negated occurrence of lit will count for make
+        while ((tClause = occurrence[numVars + lit][j])){
+            // if this variable is currently unsat, then flip of this var would make this clause sat
+            if (numTrueLit[tClause] == 0)
+                makes[i]++;
+            j++;
+        }
+        probs[i] = probsMake[makes[i]] * probsBreak[breaks[i]];
 		sumProb += probs[i];
 		i++;
 	}
-	randPosition = (double) (rand()) / RAND_MAX * sumProb;
+	randPosition = (double) rng_next_double() * sumProb;
 	for (i = i - 1; i != 0; i--) {
 		sumProb -= probs[i];
 		if (sumProb <= randPosition)
@@ -432,87 +463,6 @@ static inline void pickAndFlipNC() {
 	}
 	//fliping done!
 }
-static inline void pickAndFlip() {
-	int var;
-	int rClause = falseClause[flip % numFalse];
-	double sumProb = 0.0;
-	double randPosition;
-	register int i, j;
-	int tClause; //temporary clause variable
-	int xMakesSat; //tells which literal of x will make the clauses where it appears sat.
-	i = 0;
-	while ((var = abs(clause[rClause][i]))) {
-		probs[i] = probsBreak[breaks[var]];
-		sumProb += probs[i];
-		i++;
-	}
-	randPosition = (double) (rand()) / RAND_MAX * sumProb;
-	for (i = i - 1; i != 0; i--) {
-		sumProb -= probs[i];
-		if (sumProb <= randPosition)
-			break;
-	}
-	bestVar = abs(clause[rClause][i]);
-
-	if (atom[bestVar] == 1)
-		xMakesSat = -bestVar; //if x=1 then all clauses containing -x will be made sat after fliping x
-	else
-		xMakesSat = bestVar; //if x=0 then all clauses containing x will be made sat after fliping x
-
-	atom[bestVar] = 1 - atom[bestVar];
-
-	//1. all clauses that contain the literal xMakesSat will become SAT, if they where not already sat.
-	i = 0;
-	while ((tClause = occurrence[xMakesSat + numVars][i])) {
-		//if the clause is unsat it will become SAT so it has to be removed from the list of unsat-clauses.
-		if (numTrueLit[tClause] == 0) {
-			//remove from unsat-list
-			falseClause[whereFalse[tClause]] = falseClause[--numFalse]; //overwrite this clause with the last clause in the list.
-			whereFalse[falseClause[numFalse]] = whereFalse[tClause];
-			whereFalse[tClause] = -1;
-			critVar[tClause] = abs(xMakesSat); //this variable is now critically responsible for satisfying tClause
-			//adapt the scores of the variables
-			//the score of x has to be decreased by one because x is critical and will break this clause if fliped.
-			breaks[bestVar]++;
-		} else {
-			//if the clause is satisfied by only one literal then the score has to be increased by one for this var.
-			//because fliping this variable will no longer break the clause
-			if (numTrueLit[tClause] == 1) {
-				breaks[critVar[tClause]]--;
-			}
-		}
-		//if the number of numTrueLit[tClause]>=2 then nothing will change in the scores
-		numTrueLit[tClause]++; //the number of true Lit is increased.
-		i++;
-	}
-	//2. all clauses that contain the literal -xMakesSat=0 will not be longer satisfied by variable x.
-	//all this clauses contained x as a satisfying literal
-	i = 0;
-	while ((tClause = occurrence[numVars - xMakesSat][i])) {
-		if (numTrueLit[tClause] == 1) { //then xMakesSat=1 was the satisfying literal.
-			//this clause gets unsat.
-			falseClause[numFalse] = tClause;
-			whereFalse[tClause] = numFalse;
-			numFalse++;
-			//the score of x has to be increased by one because it is not breaking any more for this clause.
-			breaks[bestVar]--;
-			//the scores of all variables have to be increased by one ; inclusive x because flipping them will make the clause again sat
-		} else if (numTrueLit[tClause] == 2) { //find which literal is true and make it critical and decrease its score
-			j = 0;
-			while ((var = abs(clause[tClause][j]))) {
-				if (((clause[tClause][j] > 0) == atom[abs(var)])) { //x can not be the var anymore because it was flipped //&&(xMakesSat!=var)
-					critVar[tClause] = var;
-					breaks[var]++;
-					break;
-				}
-				j++;
-			}
-		}
-		numTrueLit[tClause]--;
-		i++;
-	}
-
-}
 
 double elapsed_seconds(void) {
 	double answer;
@@ -524,13 +474,9 @@ double elapsed_seconds(void) {
 	return answer;
 }
 
-static inline void printEndStatistics() {
-	printf("\nc EndStatistics:\n");
-	printf("c %-30s: %-9lli\n", "numFlips", flip);
-	printf("c %-30s: %-8.2f\n", "avg. flips/variable", (double) flip / (double) numVars);
-	printf("c %-30s: %-8.2f\n", "avg. flips/clause", (double) flip / (double) numClauses);
-	printf("c %-30s: %-8.0f\n", "flips/sec", (double) flip / tryTime);
-	printf("c %-30s: %-8.4f\n", "CPU Time", tryTime);
+static inline void printEndStatistics(int try) {
+    const char* outsep=" ";                    /* output separator */
+    fprintf (stderr, "%lld%s%lld%s%d%s%d\n", (try-1)*maxFlips+flip, outsep, maxTries*maxFlips, outsep, numClauses - numFalse, outsep, numClauses);    /* final information */
 }
 
 static inline void printUsage() {
@@ -541,17 +487,19 @@ static inline void printUsage() {
 	printf("2013\n");
 	printf("----------------------------------------------------------\n");
 	printf("\nUsage of probSAT:\n");
-	printf("./probSAT [options] <DIMACS CNF instance> [<seed>]\n");
+	printf("./probSAT [options] <DIMACS CNF instance>\n");
 	printf("\nprobSAT options:\n");
-	printf("which function to use:\n");
-	printf("--fct <0,1> : 0 =  polynomial; 1 = exponential [default = 0]\n");
-	printf("--eps <double_value> : eps>0 (only valid when --fct 0)[default = 1.0]\n");
+	printf("--eps <double_value> : eps>0 [default = 1.0]\n");
 	printf("which constant to use in the functions:\n");
-	printf("--cb <double_value> : constant for break [default = k dependet]\n");
+	printf("--cb <double_value> : constant for break [default = k dependent]\n");
+    printf("--cm <double_value> : constant for make [default = 0]\n");
 	printf("\nFurther options:\n");
-	printf("--caching <0,1>, -c<0,1>  : use caching of break values \n");
-	printf("--runs <int_value>, -r<int_value>  : maximum number of tries \n");
-	printf("--maxflips <int_value> , -m<int_value>: number of flips per try \n");
+	printf("--runs <int_value>, -t< int_value>  : maximum number of tries \n");
+	printf("--maxflips <int_value>, -m <int_value> : number of flips per try \n");
+    printf("--rngseed <time|64bit-hex|filename>, -r <time|64bit-hex|filename>  : RNG seed \n");
+    printf("--rngstate <64bit-hex,64bit-hex,64bit-hex,64bit-hex|filename>, -R <64bit-hex,64bit-hex,64bit-hex,64bit-hex|filename>  : RNG initial state \n");
+    printf("--rngsaveinit <filename>, -s <filename>  : save RNG initial state \n");
+    printf("--rngsavefinal <filename>, -S <filename>  : save RNG final state \n");
 	printf("--printSolution, -a : output assignment\n");
 	printf("--help, -h : output this help\n");
 	printf("----------------------------------------------------------\n\n");
@@ -560,42 +508,39 @@ static inline void printUsage() {
 void initPoly() {
 	int i;
 	probsBreak = (double*) malloc(sizeof(double) * (maxNumOccurences + 1));
+    probsMake = (double*) malloc(sizeof(double) * (maxNumOccurences + 1));
 	for (i = 0; i <= maxNumOccurences; i++) {
 		probsBreak[i] = pow((eps + i), -cb);
-	}
-}
-
-void initExp() {
-	int i;
-	probsBreak = (double*) malloc(sizeof(double) * (maxNumOccurences + 1));
-	for (i = 0; i <= maxNumOccurences; i++) {
-		probsBreak[i] = pow(cb, -i);
+        probsMake[i] = pow(i, cm);
 	}
 }
 
 void parseParameters(int argc, char *argv[]) {
 	//define the argument parser
 	static struct option long_options[] =
-			{ { "fct", required_argument, 0, 'f' }, { "caching", required_argument, 0, 'c' }, { "eps", required_argument, 0, 'e' }, { "cb", required_argument, 0, 'b' }, { "runs", required_argument, 0, 't' }, { "maxflips", required_argument, 0, 'm' }, { "printSolution", no_argument, 0, 'a' }, { "help", no_argument, 0, 'h' }, { 0, 0, 0, 0 } };
+			{ { "eps", required_argument, 0, 'e' },
+              { "cb", required_argument, 0, 'b' },
+              { "cm", required_argument, 0, 'd' },
+              { "runs", required_argument, 0, 't' },
+              { "maxflips", required_argument, 0, 'm' },
+              { "rngseed", required_argument, 0, 'r' },
+              { "rngstate", required_argument, 0, 'R' },
+              { "rngsaveinit", required_argument, 0, 's' },
+              { "rngsavefinal", required_argument, 0, 'S' },
+              { "printSolution", no_argument, 0, 'a' },
+              { "help", no_argument, 0, 'h' },
+              { 0, 0, 0, 0 } };
 
 	while (optind < argc) {
 		int index = -1;
 		struct option * opt = 0;
-		int result = getopt_long(argc, argv, "f:e:c:b:t:m:ah", long_options, &index); //
+		int result = getopt_long(argc, argv, "e:b:d:t:m:r:R:s:S:a:h", long_options, &index); //
 		if (result == -1)
 			break; /* end of list */
 		switch (result) {
 		case 'h':
 			printUsage();
 			exit(0);
-			break;
-		case 'c':
-			caching = atoi(optarg);
-			caching_spec = 1;
-			break;
-		case 'f':
-			fct = atoi(optarg);
-			fct_spec = 1;
 			break;
 		case 'e':
 			eps = atof(optarg);
@@ -608,12 +553,20 @@ void parseParameters(int argc, char *argv[]) {
 			cb = atof(optarg);
 			cb_spec = 1;
 			break;
+        case 'd':
+            cm = atof(optarg);
+            break;
 		case 't': //maximum number of tries to solve the problems within the maxFlips
 			maxTries = atoi(optarg);
 			break;
 		case 'm': //maximum number of flips to solve the problem
 			maxFlips = atoi(optarg);
 			break;
+        case 'r':      /* PRNG controls */
+        case 'R':
+        case 's':
+        case 'S': rng_options (result, optarg, argv[0]);
+            break;
 		case 'a': //print assignment for variables at the end
 			printSol = 1;
 			break;
@@ -639,19 +592,15 @@ void parseParameters(int argc, char *argv[]) {
 	}
 	fileName = *(argv + optind);
 
-	if (argc > optind + 1) {
-		seed = atoi(*(argv + optind + 1));
-		if (seed == 0)
-			printf("c there might be an error in the command line or is your seed 0?");
-	} else
-		seed = time(0);
+    if (!rng_apply_options (argv[0])) exit(EXIT_FAILURE);
 }
 
 void handle_interrupt() {
 	printf("\nc caught signal... exiting\n ");
 	tryTime = elapsed_seconds();
 	printf("\ns UNKNOWN best(%d) (%-15.5fsec)\n", bestNumFalse, tryTime);
-	printEndStatistics();
+	printEndStatistics(-1);
+    freeMemory();
 	fflush(NULL);
 	exit(-1);
 }
@@ -665,22 +614,7 @@ void setupSignalHandler() {
 }
 
 void setupParameters() {
-	if (!caching_spec) {
-		if (maxClauseSize <= 3){
-			pickAndFlipVar = pickAndFlipNC; //no caching of the break values in case of 3SAT
-			caching =0;
-		}
-		else{
-			pickAndFlipVar = pickAndFlip; //cache the break values for other k-SAT
-			caching = 1;
-		}
-	}
-	else{
-		if (caching)
-			pickAndFlipVar = pickAndFlip; //cache the break values for other k-SAT
-		else
-			pickAndFlipVar = pickAndFlipNC; //no caching of the break values in case of 3SAT
-	}
+	pickAndFlipVar = pickAndFlipNC; //no caching of the break values in case of 3SAT
 	if (!cb_spec) {
 		if (maxClauseSize <= 3) {
 			cb = 2.06;
@@ -695,16 +629,7 @@ void setupParameters() {
 		else
 			cb = 5.4;
 	}
-	if (!fct_spec) {
-		if (maxClauseSize < 4)
-			fct = 0;
-		else
-			fct = 1;
-	}
-	if (fct == 0)
-		initLookUpTable = initPoly;
-	else
-		initLookUpTable = initExp;
+	initLookUpTable = initPoly;
 }
 
 int main(int argc, char *argv[]) {
@@ -718,7 +643,6 @@ int main(int argc, char *argv[]) {
 	initLookUpTable(); //Initialize the look up table
 	setupSignalHandler();
 	printSolverParameters();
-	srand(seed);
 
 	for (try = 0; try < maxTries; try++) {
 		init();
@@ -735,9 +659,11 @@ int main(int argc, char *argv[]) {
 			if (!checkAssignment()) {
 				fprintf(stderr, "c ERROR the assignment is not valid!");
 				printf("c UNKNOWN");
+                freeMemory();
 				return 0;
 			} else {
-				printEndStatistics();
+				printEndStatistics(try+1);
+                freeMemory();
 				printf("s SATISFIABLE\n");
 				if (printSol == 1)
 					printSolution();
@@ -746,7 +672,9 @@ int main(int argc, char *argv[]) {
 		} else
 			printf("c UNKNOWN best(%4d) current(%4d) (%-15.5fsec)\n", bestNumFalse, numFalse, tryTime);
 	}
-	printEndStatistics();
+	printEndStatistics(try);
+    freeMemory();
+    rng_end_options (argv[0]);
 	if (maxTries > 1)
 		printf("c %-30s: %-8.3fsec\n", "Mean time per try", totalTime / (double) try);
 	return 0;
