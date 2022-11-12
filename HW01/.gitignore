@@ -1,2 +1,15 @@
 .idea/
 venv/
+
+pilot/gsat_pilot_results/*.csv
+pilot/gsat_pilot_results/*.txt
+
+pilot/probsat_pilot_results/*.csv
+pilot/probsat_pilot_results/*.txt
+
+experiment/gsat_results/*.csv
+experiment/gsat_results/*.txt
+
+experiment/probsat_results/*.csv
+experiment/probsat_results/*.txt
+
