@@ -1,13 +1,22 @@
 # PILOT
-pilot_all:
-	make pilot_clean
-	make pilot_run
+run_solvers_pilot:
+	rm -f ./pilot/gsat_results/gsat_results_*.csv
+	rm -f ./pilot/probsat_results/probsat_results_*.csv
+	cd pilot; ../venv/bin/python3 run_solvers.py
 
-pilot_clean:
-	rm -f ./pilot/gsat_pilot_results/*.csv
-	rm -f ./pilot/gsat_pilot_results/*.txt
-	rm -f ./pilot/probsat_pilot_results/*.csv
-	rm -f ./pilot/probsat_pilot_results/*.txt
+process_results_pilot:
+	rm -f ./gsat_results/gsat_stats.txt
+	rm -f ./probsat_results/probsat_stats.txt
+	cd pilot; ../venv/bin/python3 process_results.py
 
-pilot_run:
-	cd pilot; python3 run_pilot.py
+# EXPERIMENT
+run_solvers_experiment:
+	rm -f ./experiment/gsat_results/gsat_results.csv
+	rm -f ./experiment/probsat_results/probsat_results.csv
+	cd experiment; ../venv/bin/python3 run_solvers.py
+
+process_results_experiment:
+	rm -f ./experiment/gsat_results/gsat_stats.csv
+	rm -f ./experiment/probsat_results/probsat_stats.csv
+	cd experiment; ../venv/bin/python3 process_results.py
+
