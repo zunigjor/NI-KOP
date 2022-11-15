@@ -6,13 +6,14 @@ import time
 
 INSTANCE_RUNS = 1000
 INSTANCE_PATH = '../instance/'
+MAX_FLIPS = 1500
 # gSAT2
 GSAT = '../gSAT2/gSAT2'
-GSAT_ARGS = ' -p 0.4 -r time -i 1500 {input}'
-GSAT_OUTPUT = './gsat_results/gsat_results.csv'
+GSAT_ARGS = ' -p 0.4 -r time -i {mf} {input}'
+GSAT_OUTPUT = './gsat2_results/gsat2_results.csv'
 # probSAT
 PROBSAT = '../probSAT/probSAT'
-PROBSAT_ARGS = ' --cb 2.3 --cm 0 -r time --maxflips 1500 {input}'
+PROBSAT_ARGS = ' --cb 2.3 --cm 0 -r time --maxflips {mf} {input}'
 PROBSAT_OUTPUT = './probsat_results/probsat_results.csv'
 
 
@@ -37,7 +38,7 @@ def run_SAT(SAT_solver, SAT_args, SAT_output):
                 input_path = f'{INSTANCE_PATH}{instance_folder}/{instance_folder[0:5]}0{i}.cnf'
                 for j in range(INSTANCE_RUNS):
                     # Run command
-                    command = SAT_solver + SAT_args.format(input=input_path)
+                    command = SAT_solver + SAT_args.format(mf=MAX_FLIPS, input=input_path)
                     result = subprocess.run([command], shell=True, capture_output=True).stderr
                     print(f'{os.path.basename(input_path)} {result.decode("utf-8")}', end='', file=output_file)
 

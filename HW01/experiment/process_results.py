@@ -1,47 +1,210 @@
+import sys
+import os
+import math
+import time
 import pandas as pd
+import numpy as np
 import run_solvers as rs
+from statsmodels.distributions.empirical_distribution import ECDF
+
 
 INSTANCE_RUNS = rs.INSTANCE_RUNS
+MAX_FLIPS = rs.MAX_FLIPS
 GSAT_RESULTS = rs.GSAT_OUTPUT
-GSAT_AVG_RESULTS = './gsat_results/gsat_avg_results.csv'
-GSAT_STATS = './gsat_results/gsat_stats.txt'
+GSAT = rs.GSAT
+GSAT_NAME = os.path.basename(GSAT)
+GSAT_STATS = './gsat2_results/gsat2_stats.csv'
+PROBSAT = rs.PROBSAT
+PROBSAT_NAME = os.path.basename(PROBSAT)
 PROBSAT_RESULTS = rs.PROBSAT_OUTPUT
-PROBSAT_AVG_RESULTS = './probsat_results/probsat_avg_results.csv'
-PROBSAT_STATS = './probsat_results/probsat_stats.txt'
+PROBSAT_STATS = './probsat_results/probsat_stats.csv'
+XING_WINNER = './results/xing_winner.csv'
+FINAL_STATS = './results/final_stats.csv'
 
 
-def avg_results(SAT_results, SAT_avg_results):
-    SAT_results_df = pd.read_csv(SAT_results, header=None)
-    print(SAT_results_df)
+def instance_name(instance_df):
+    return instance_df['inst'].values[0]
 
 
-def process_results(SAT_results, SAT_avg_results, SAT_stats):
-    avg_results(SAT_results, SAT_avg_results)
-    # number_of_instances = 0  # total number of instances
-    # flips_equal_maxflips = 0  # SAT solver hit maximum flips
-    # solved = 0  # SAT solver found a solution
-    # with open(SAT_stats, 'w', newline='') as stats, open(SAT_results, 'r', newline='') as output_file:
-    #     data_reader = csv.reader(output_file, delimiter=' ')
-    #     for row in data_reader:
-    #         number_of_instances += 1
-    #         if row[0] == row[1]:
-    #             flips_equal_maxflips += 1
-    #         if row[2] == row[3]:
-    #             solved += 1
-    #     # Output stats to file
-    #     print(f'Rows: {number_of_instances:>22}', file=stats)
-    #     print(f'Flips maxed: {flips_equal_maxflips:>15}', file=stats)
-    #     print(f'Solved: {solved:>20}', file=stats)
-    #     # Output stats to terminal
-    #     print(f'Rows: {number_of_instances:>22}')
-    #     print(f'Flips maxed: {flips_equal_maxflips:>15}')
-    #     print(f'Solved: {solved:>20}')
+def successful_runs(instance_df):
+    return len(instance_df[instance_df['satisfied'] == instance_df['max_satisfied']].values)
+
+
+def total_runs(instance_df):
+    return instance_df.shape[0]
+
+
+def average_flips(instance_df):
+    return instance_df['flips'].mean()
+
+
+def fined_average_flips(instance_df):
+    flips = instance_df['flips'].values
+    satisfied = instance_df['satisfied'].values
+    max_satisfied = instance_df['max_satisfied'].values
+    penalty = 10
+    fin_avg = 0
+    for i in instance_df.index:
+        if satisfied[i] < max_satisfied[i]:
+            fin_avg += (flips[i] * penalty)
+        else:
+            fin_avg += flips[i]
+    return fin_avg / flips.size
+
+
+def mu(instance_df):
+    instance_df = instance_df[instance_df['satisfied'] == instance_df['max_satisfied']]
+    instance_df = instance_df[instance_df['flips'] != 0]
+    instance_df['log_flips'] = np.log(instance_df['flips'])
+    return instance_df['log_flips'].mean()
+
+
+def sigma_squared(instance_df):
+    mu_ = mu(instance_df)
+    instance_df = instance_df[instance_df['satisfied'] == instance_df['max_satisfied']]
+    instance_df = instance_df[instance_df['flips'] != 0]
+    sigma_sum = 0
+    for i in instance_df.index:
+        sigma_sum += math.pow(math.log(instance_df['flips'][i]) - mu_, 2)
+    return sigma_sum / (successful_runs(instance_df) - 1)
+
+
+def process_results(sat_solver, sat_results, sat_stats):
+    start = time.time()
+    sat_name = os.path.basename(sat_solver)
+    sat_results_df = pd.read_csv(
+        sat_results,
+        header=None,
+        delimiter=' ',
+        names=['inst', 'flips', 'max_flips', 'satisfied', 'max_satisfied'],
+    )
+    with open(sat_stats, 'w') as stats_file:
+        print(f'inst,succ {sat_name},of,steps {sat_name},awg fined {sat_name},mu {sat_name},sig^2 {sat_name}', file=stats_file)
+        for i in range(0, sat_results_df.shape[0], INSTANCE_RUNS):
+            instance_df = sat_results_df[i:i + INSTANCE_RUNS]
+            instance_df.reset_index(drop=True, inplace=True)
+            sys.stdout.write(f'\r{int(i/INSTANCE_RUNS)+1}/{int(sat_results_df.shape[0]/INSTANCE_RUNS)}')
+            sys.stdout.flush()
+            inst = instance_name(instance_df)
+            succ = successful_runs(instance_df)
+            of = total_runs(instance_df)
+            avg_flips = round(average_flips(instance_df), 3)
+            avg_fined = round(fined_average_flips(instance_df), 3)
+            mu_ = round(mu(instance_df), 5)
+            sig2 = round(sigma_squared(instance_df), 5)
+            print(f'{inst},{succ},{of},{avg_flips},{avg_fined},{mu_},{sig2}', file=stats_file)
+    end = time.time()
+    print(f'\n{round(end - start)}s')
+
+
+def cdf(instance_df):
+    instance_df = instance_df[instance_df['satisfied'] == instance_df['max_satisfied']]
+    ecdf = ECDF(instance_df['flips'].values.tolist())
+    return ecdf(list(range(1, MAX_FLIPS + 1)))
+
+
+def corrected_cdf(instance_df):
+    instance_cdf = cdf(instance_df)
+    tries = instance_df.shape[0]
+    succ = successful_runs(instance_df)
+    return [cdf_val * (succ / tries) for cdf_val in instance_cdf]
+
+
+def ccdf_comparison(gsat_ccdf, probsat_ccdf):
+    for index in range(len(probsat_ccdf) - 1, -1, -1):
+        if probsat_ccdf[index] != gsat_ccdf[index]:
+            return PROBSAT_NAME if probsat_ccdf[index] > gsat_ccdf[index] else GSAT_NAME
+
+
+def xing(winner, gsat_ccdf, probsat_ccdf):
+    if winner == PROBSAT_NAME:
+        for index in range(len(probsat_ccdf) - 1, -1, -1):
+            if probsat_ccdf[index] < gsat_ccdf[index]:
+                return index
+    else:
+        for index in range(len(probsat_ccdf) - 1, -1, -1):
+            if probsat_ccdf[index] > gsat_ccdf[index]:
+                return index
+
+
+def xing_and_winner(gsat_results_file, probsat_results_file, xing_winner_file):
+    start = time.time()
+    gsat_results_df = pd.read_csv(
+        gsat_results_file,
+        header=None,
+        delimiter=' ',
+        names=['inst', 'flips', 'max_flips', 'satisfied', 'max_satisfied'],
+    )
+    probsat_results_df = pd.read_csv(
+        probsat_results_file,
+        header=None,
+        delimiter=' ',
+        names=['inst', 'flips', 'max_flips', 'satisfied', 'max_satisfied'],
+    )
+    with open(xing_winner_file, 'w') as x_w_file:
+        print('inst,xing,winner', file=x_w_file)
+        for i in range(0, gsat_results_df.shape[0], INSTANCE_RUNS):
+            sys.stdout.write(f'\r{int(i / INSTANCE_RUNS) + 1}/{int(gsat_results_df.shape[0] / INSTANCE_RUNS)}')
+            sys.stdout.flush()
+            # gsat2
+            gsat_instance_df = gsat_results_df[i:i + INSTANCE_RUNS]
+            gsat_instance_df.reset_index(drop=True, inplace=True)
+            gsat_ccdf = corrected_cdf(gsat_instance_df)
+            # probsat
+            probsat_instance_df = probsat_results_df[i:i + INSTANCE_RUNS]
+            probsat_instance_df.reset_index(drop=True, inplace=True)
+            probsat_ccdf = corrected_cdf(probsat_instance_df)
+            # calc results
+            name = instance_name(gsat_instance_df)
+            winner = ccdf_comparison(gsat_ccdf, probsat_ccdf)
+            xing_ = xing(winner, gsat_ccdf, probsat_ccdf)
+            print(f'{name},{xing_},{winner}', file=x_w_file)
+    end = time.time()
+    print(f'\n{round(end - start)}s')
+
+
+def final_results(gsat_stats, probsat_stats, xing_winner, final_stats):
+    gsat_stats_df = pd.read_csv(gsat_stats)
+    probsat_stats_df = pd.read_csv(probsat_stats)
+    xing_winner_df = pd.read_csv(xing_winner)
+    final_stats_df = pd.DataFrame()
+    # inst
+    final_stats_df['inst'] = gsat_stats_df['inst']
+    # succ
+    final_stats_df['succ gSAT2'] = gsat_stats_df['succ gSAT2']
+    final_stats_df['succ probSAT'] = probsat_stats_df['succ probSAT']
+    # of
+    final_stats_df['of'] = gsat_stats_df['of']
+    # steps
+    final_stats_df['steps gSAT2'] = gsat_stats_df['steps gSAT2']
+    final_stats_df['steps probSAT'] = probsat_stats_df['steps probSAT']
+    # awg fined
+    final_stats_df['awg fined gSAT2'] = gsat_stats_df['awg fined gSAT2']
+    final_stats_df['awg fined probSAT'] = probsat_stats_df['awg fined probSAT']
+    # mu sig
+    final_stats_df['mu gSAT2'] = gsat_stats_df['mu gSAT2']
+    final_stats_df['sig^2 gSAT2'] = gsat_stats_df['sig^2 gSAT2']
+    final_stats_df['mu probSAT'] = probsat_stats_df['mu probSAT']
+    final_stats_df['sig^2 probSAT'] = probsat_stats_df['sig^2 probSAT']
+    # xing
+    final_stats_df['xing'] = xing_winner_df['xing']
+    # winner
+    final_stats_df['winner'] = xing_winner_df['winner']
+    final_stats_df.to_csv(final_stats, index=False)
 
 
 if __name__ == '__main__':
     print("======================================")
-    process_results(GSAT_RESULTS, GSAT_AVG_RESULTS, GSAT_STATS)
+    print(GSAT_STATS)
+    process_results(GSAT, GSAT_RESULTS, GSAT_STATS)
     print("--------------------------------------")
-    process_results(PROBSAT_RESULTS, PROBSAT_RESULTS, PROBSAT_STATS)
+    print(PROBSAT_STATS)
+    process_results(PROBSAT, PROBSAT_RESULTS, PROBSAT_STATS)
+    print("--------------------------------------")
+    print(XING_WINNER)
+    xing_and_winner(GSAT_RESULTS, PROBSAT_RESULTS, XING_WINNER)
+    print("--------------------------------------")
+    print(FINAL_STATS)
+    final_results(GSAT_STATS, PROBSAT_STATS, XING_WINNER, FINAL_STATS)
     print("======================================")
     exit()

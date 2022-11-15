@@ -1,0 +1,28 @@
+300:
+  Total rows:                     30000
+  Flips maxed:                     8181
+  Solved:                         21826
+  Solved/flips:                   72.75
+700:
+  Total rows:                     30000
+  Flips maxed:                     5279
+  Solved:                         24726
+  Solved/flips:                   35.32
+1500:
+  Total rows:                     30000
+  Flips maxed:                     3205
+  Solved:                         26797
+  Solved/flips:                   17.86
+3000:
+  Total rows:                     30000
+  Flips maxed:                     1680
+  Solved:                         28321
+  Solved/flips:                    9.44
+6000:
+  Total rows:                     30000
+  Flips maxed:                      663
+  Solved:                         29337
+  Solved/flips:                    4.89
+Total stats:
+  Average solved:              26201.40
+  Average solved/flips:           28.05
