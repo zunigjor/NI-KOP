@@ -5,9 +5,11 @@ import time
 import pandas as pd
 import numpy as np
 import run_solvers as rs
+import matplotlib.pyplot as plt
 from statsmodels.distributions.empirical_distribution import ECDF
 
 
+INSTANCE_PATH = rs.INSTANCE_PATH
 INSTANCE_RUNS = rs.INSTANCE_RUNS
 MAX_FLIPS = rs.MAX_FLIPS
 GSAT_RESULTS = rs.GSAT_OUTPUT
@@ -18,6 +20,7 @@ PROBSAT = rs.PROBSAT
 PROBSAT_NAME = os.path.basename(PROBSAT)
 PROBSAT_RESULTS = rs.PROBSAT_OUTPUT
 PROBSAT_STATS = './probsat_results/probsat_stats.csv'
+RESULTS_PATH = './results/'
 XING_WINNER = './results/xing_winner.csv'
 FINAL_STATS = './results/final_stats.csv'
 
@@ -193,6 +196,55 @@ def final_results(gsat_stats, probsat_stats, xing_winner, final_stats):
     final_stats_df.to_csv(final_stats, index=False)
 
 
+def plot_histogram_comparison(data_set, df, col1, col2, file_suffix):
+    fig, ax = plt.subplots()
+    ax.hist(df[col1], label=col1, histtype="step", density=True)
+    ax.hist(df[col2], label=col2, histtype="step", density=True)
+    ax.set_title(f'{data_set} - {file_suffix}')
+    box = ax.get_position()
+    ax.set_position([box.x0, box.y0 + box.height * 0.1, box.width, box.height * 0.9])
+    ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05), fancybox=True, shadow=True, ncol=5)
+    plt.savefig(f"{RESULTS_PATH}{data_set}_{file_suffix}.png")
+
+def plot_bars(data_set, df, col, file_suffix):
+    fig, ax = plt.subplots()
+    values = df[col].value_counts().keys().tolist()
+    counts = df[col].value_counts().tolist()
+    ax.bar(values, counts)
+    ax.set_title(f'{data_set} - {file_suffix}')
+    plt.savefig(f"{RESULTS_PATH}{data_set}_{file_suffix}.png")
+
+def plot_results(final_stats):
+    final_stats_df = pd.read_csv(final_stats)
+
+    instance_path = os.listdir(INSTANCE_PATH)
+    instance_path.sort()
+    lengthts = []
+    for data_set in instance_path:
+        lengthts.append(len(os.listdir(INSTANCE_PATH + data_set)))
+
+    data_set_dfs = []
+    for data_set_length in lengthts:
+        dat_set_df = final_stats_df.head(data_set_length)
+        dat_set_df.reset_index(drop=True, inplace=True)
+        final_stats_df = final_stats_df.tail(final_stats_df.shape[0] - data_set_length)
+        data_set_dfs.append(dat_set_df)
+
+    for data_set, df in zip(instance_path, data_set_dfs):
+        # succ
+        plot_histogram_comparison(data_set, df, 'succ gSAT2', 'succ probSAT', 'succ')
+        # steps
+        plot_histogram_comparison(data_set, df, 'steps gSAT2', 'steps probSAT', 'steps')
+        # awg fined
+        plot_histogram_comparison(data_set, df, 'awg fined gSAT2', 'awg fined probSAT', 'awg_fined')
+        # mu
+        plot_histogram_comparison(data_set, df, 'mu gSAT2', 'mu probSAT', 'mu')
+        # sig^2
+        plot_histogram_comparison(data_set, df, 'sig^2 gSAT2', 'sig^2 probSAT', 'sig^2')
+        # winner
+        plot_bars(data_set, df, 'winner', 'winner')
+
+
 if __name__ == '__main__':
     print("======================================")
     print(GSAT_STATS)
@@ -206,5 +258,8 @@ if __name__ == '__main__':
     print("--------------------------------------")
     print(FINAL_STATS)
     final_results(GSAT_STATS, PROBSAT_STATS, XING_WINNER, FINAL_STATS)
+    print("--------------------------------------")
+    print("generating plots...")
+    plot_results(FINAL_STATS)
     print("======================================")
     exit()

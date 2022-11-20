@@ -27,6 +27,7 @@ process_results_experiment:
 	rm -f ./experiment/probsat_results/probsat_stats.csv
 	rm -f ./results/xing_winner.csv
 	rm -f ./results/final_stats.csv
+	rm -f ./results/*.png
 	# Process results
 	cd experiment; ../venv/bin/python3 process_results.py
 
