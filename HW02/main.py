@@ -1,10 +1,10 @@
 import os
 import shutil
-
 import pandas as pd
 from multiprocessing import Process
 from datetime import datetime
 
+import box
 from simulated_annealing.instance_opt_parser import parse_optimum
 from simulated_annealing.instance_parser import parse_instance
 from simulated_annealing.state import State
@@ -13,67 +13,15 @@ from simulated_annealing.simulated_annealing import simulated_annealing, success
 from simulated_annealing.fitness_plot import plot_fitnesses
 
 
-### Whitebox runs
-def whitebox_0(instance_data):
-    temperature = 10000
-    equilibrium = 20
-    min_tepmerature = 0.0001
-    cooling_coef = 0.9
-    cost_coef = 3
-    return temperature, equilibrium, min_tepmerature, cooling_coef, cost_coef
-
-def whitebox_1(instance_data):
-    temperature = 100000
-    equilibrium = 20
-    min_tepmerature = 0.0001
-    cooling_coef = 0.9
-    cost_coef = 3
-    return temperature, equilibrium, min_tepmerature, cooling_coef, cost_coef
-
-def whitebox_2(instance_data):
-    temperature = 100000
-    equilibrium = 50
-    min_tepmerature = 0.0001
-    cooling_coef = 0.9
-    cost_coef = 3
-    return temperature, equilibrium, min_tepmerature, cooling_coef, cost_coef
-
-def whitebox_3(instance_data):
-    temperature = 100000
-    equilibrium = 200
-    min_tepmerature = 0.0001
-    cooling_coef = 0.9
-    cost_coef = 2
-    return temperature, equilibrium, min_tepmerature, cooling_coef, cost_coef
-
-def whitebox_4(instance_data):
-    temperature = len(instance_data.weights) * max(instance_data.weights)
-    equilibrium = len(instance_data.weights) * 2
-    min_tepmerature = 0.0001
-    cooling_coef = 0.9
-    cost_coef = 3
-    return temperature, equilibrium, min_tepmerature, cooling_coef, cost_coef
-
-def whitebox_5(instance_data):
-    temperature = len(instance_data.weights) * max(instance_data.weights)
-    equilibrium = len(instance_data.weights) * 4
-    min_tepmerature = 0.0001
-    cooling_coef = 0.9
-    cost_coef = 3
-    return temperature, equilibrium, min_tepmerature, cooling_coef, cost_coef
+def rm_r(path):
+    if not os.path.exists(path):
+        return
+    if os.path.isfile(path) or os.path.islink(path):
+        os.unlink(path)
+    else:
+        shutil.rmtree(path)
 
 
-### Blackbox run
-def blackbox(instance_data):
-    temperature = len(instance_data.weights) * max(instance_data.weights)
-    equilibrium = len(instance_data.weights) * 4
-    min_tepmerature = 0.0001
-    cooling_coef = 0.9
-    cost_coef = 3
-    return temperature, equilibrium, min_tepmerature, cooling_coef, cost_coef
-
-
-# Sim functions
 def fill_in_fitnesses(fitness_list):
     max_len = max(map(len, fitness_list))
     for list in fitness_list:
@@ -87,8 +35,10 @@ def is_solution_optimal(solution, optimum):
     return solution.weight_sum == optimum[solution.instance_data.instance_name].weights
 
 
-def run_sim(whitebox=True, params_function=whitebox_0):
+def run_sim(params_function, whitebox=False):
+    # Create folders
     run_name = params_function.__name__
+    rm_r(f"results/{run_name}")
     csv_output_path = f"results/{run_name}/"
     plots_output_path = f"results/{run_name}/plots/"
     try:
@@ -102,7 +52,7 @@ def run_sim(whitebox=True, params_function=whitebox_0):
     # Measure time
     start_time = datetime.now()
     print(f"{os.getpid()} {run_name} start: {start_time.strftime('%H:%M:%S')}")
-
+    # Go trough instances
     instances_path = "./instances"
     instance_dir: list = os.listdir(instances_path)
     instance_dir.sort()
@@ -110,6 +60,7 @@ def run_sim(whitebox=True, params_function=whitebox_0):
     for wufX_X in instance_dir:
         wufX_X_path = instances_path + "/" + wufX_X
         wufX_X_dir = os.listdir(wufX_X_path)
+        # Extract optimums
         wufX_X_X_opt_dats = [opt for opt in wufX_X_dir if opt.endswith("-opt.dat")]
         wufX_X_X_opt_dats.sort()
         wufX_X_X_dir = list(set(wufX_X_dir) - set(wufX_X_X_opt_dats))
@@ -129,8 +80,7 @@ def run_sim(whitebox=True, params_function=whitebox_0):
                                         'is_solution'
                                         ])
         # iterate ./instance/wufX-X  = wuf20-91-M, wuf20-91-N ...
-        # WHITEBOX run chooses only -M folders
-        for i in range(1) if whitebox else range(len(wufX_X_X_dir)):
+        for i in range(len(wufX_X_X_dir)):
             wufX_X_X_dir_path = wufX_X_path + "/" + wufX_X_X_dir[i]
             wufX_X_X_dir_instances = os.listdir(wufX_X_X_dir_path)
             wufX_X_X_opt_dat_path = wufX_X_path + "/" + wufX_X_X_opt_dats[i]
@@ -138,14 +88,16 @@ def run_sim(whitebox=True, params_function=whitebox_0):
             optimum = parse_optimum(wufX_X_X_opt_dat_path)
             # metric
             optimal_rate = 0
+            is_solution_rate = 0
             solutions = []
             # iterate ./instance/wufX-X/wufX-X-X := wuf20-01, wuf20-02, wuf20-03 ...
-            for j in range(25) if whitebox else range(len(wufX_X_X_dir_instances)):
+            for j in range(10) if whitebox else range(100):
                 instance_name = wufX_X_X_dir[i][0:6] + "0" + str(j + 1)
                 instance_path = wufX_X_X_dir_path + "/" + instance_name + ".mwcnf"
                 # metric
                 fitnesses = []
-                for k in range(10) if whitebox else range(30):
+                for k in range(5) if whitebox else range(10):
+                    # Measure instance time
                     instance_start = datetime.now()
                     instance_data = parse_instance(instance_path)
                     is_solution = False
@@ -169,6 +121,7 @@ def run_sim(whitebox=True, params_function=whitebox_0):
                     fitnesses = fill_in_fitnesses(fitnesses)
                     if success_rate(solution) == 1:
                         is_solution = True
+                        is_solution_rate += 1
                     results.loc[len(results.index)] = [instance_name,
                                                        temperature,
                                                        min_temperature,
@@ -180,16 +133,23 @@ def run_sim(whitebox=True, params_function=whitebox_0):
                                                        solution.cost,
                                                        solution.weight_sum,
                                                        is_solution]
+                    # Measure instance time
                     instance_end = datetime.now()
-                    instance_took = instance_end - instance_start
-                    inst_std_out = f"{run_name} {str(instance_name)}, {str(k+1)}, sol: {str(is_solution)[0]}, opt: {str(optimal)[0]}, took: {instance_took}"
-                    print(inst_std_out)
+                    instance_elapsed_took = instance_end - instance_start
+                    instance_took = "%02d:%02d:%02d" % (instance_elapsed_took.seconds // 3600, instance_elapsed_took.seconds // 60 % 60, instance_elapsed_took.seconds % 60)
+                    instance_took = instance_took + f".{str(instance_elapsed_took.microseconds)[:1]}"
+                    instance_elapsed_since_start = instance_end - start_time
+                    instance_since_start = "%02d:%02d:%02d:%02d" % (instance_elapsed_since_start.days, instance_elapsed_since_start.seconds // 3600, instance_elapsed_since_start.seconds // 60 % 60, instance_elapsed_since_start.seconds % 60)
+                    print(f"{run_name} {wufX_X_X_dir[i]} {str(instance_name)}, {str(k+1)}, sol: {str(is_solution)[0]}, opt: {str(optimal)[0]}, took: {instance_took}, since_start: {instance_since_start}")
+                    # plot first run
                     if k == 0:
                         plot_fitnesses(plots_output_path, fitnesses, instance_name, weights, sat_clauses, best_states)
-            print(f"{run_name} average success rate: " + str(sum(succ) / len(succ)))
-            print(f"{run_name} optimal weights reached: " + str(optimal_rate / len(solutions)))
+            # Print and save instanceset results
+            print(f"{'*'*40}\n{run_name}, {wufX_X_X_dir[i]}, avg. sat. clauses: {sum(succ) / len(succ)}, optimum reached: {optimal_rate / len(solutions)}, solutions rate: {is_solution_rate / len(solutions)}\n{'*'*40}")
+            with open("results/stats.csv", 'a') as out_file:
+                out_file.write(f"{run_name}, {wufX_X_X_dir[i]}, {sum(succ) / len(succ)}, {optimal_rate / len(solutions)}, {is_solution_rate / len(solutions)}\n")
             results.to_csv(f"{csv_output_path}{str(wufX_X_X_dir[i])}_{run_name}.csv")
-    # Measure time
+    # Measure total time
     end_time = datetime.now()
     elapsed_total = end_time - start_time
     out_strarted_at = f"Start: {start_time.strftime('%H:%M:%S')}"
@@ -199,27 +159,26 @@ def run_sim(whitebox=True, params_function=whitebox_0):
 
 
 if __name__ == '__main__':
-    def rm_r(path):
-        if not os.path.exists(path):
-            return
-        if os.path.isfile(path) or os.path.islink(path):
-            os.unlink(path)
-        else:
-            shutil.rmtree(path)
-
-    rm_r("./results")
     try:
         os.mkdir("results")
     except:
-        print(f"Directory ./results already exists")
+        pass
+    with open("results/stats.csv", 'w') as out_file:
+        out_file.write("Name, Instances, Satisfied clauses, Optimums reached, Solutions found\n")
 
-    w_0 = Process(target=run_sim, args=(True, whitebox_0))
-    w_1 = Process(target=run_sim, args=(True, whitebox_1))
-    w_2 = Process(target=run_sim, args=(True, whitebox_2))
-    w_3 = Process(target=run_sim, args=(True, whitebox_3))
-    w_4 = Process(target=run_sim, args=(True, whitebox_4))
-    w_5 = Process(target=run_sim, args=(True, whitebox_5))
-    bbx = Process(target=run_sim, args=(False, blackbox))
+    w_0 = Process(target=run_sim, args=(box.whitebox_0, True))
+    w_1 = Process(target=run_sim, args=(box.whitebox_1, True))
+    w_2 = Process(target=run_sim, args=(box.whitebox_2, True))
+    w_3 = Process(target=run_sim, args=(box.whitebox_3, True))
+    w_4 = Process(target=run_sim, args=(box.whitebox_4, True))
+    w_5 = Process(target=run_sim, args=(box.whitebox_5, True))
+    w_6 = Process(target=run_sim, args=(box.whitebox_6, True))
+    w_7 = Process(target=run_sim, args=(box.whitebox_7, True))
+    w_8 = Process(target=run_sim, args=(box.whitebox_8, True))
+    w_9 = Process(target=run_sim, args=(box.whitebox_9, True))
+    w_10 = Process(target=run_sim, args=(box.whitebox_10, True))
+    w_11 = Process(target=run_sim, args=(box.whitebox_11, True))
+    blackbox = Process(target=run_sim, args=(box.blackbox, False))
 
     w_0.start()
     w_1.start()
@@ -227,7 +186,13 @@ if __name__ == '__main__':
     w_3.start()
     w_4.start()
     w_5.start()
-    bbx.start()
+    w_6.start()
+    w_7.start()
+    w_8.start()
+    w_9.start()
+    w_10.start()
+    w_11.start()
+    blackbox.start()
 
     w_0.join()
     w_1.join()
@@ -235,4 +200,10 @@ if __name__ == '__main__':
     w_3.join()
     w_4.join()
     w_5.join()
-    bbx.join()
+    w_6.join()
+    w_7.join()
+    w_8.join()
+    w_9.join()
+    w_10.join()
+    w_11.join()
+    blackbox.join()

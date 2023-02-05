@@ -1,5 +1,6 @@
 import numpy as np
 import random
+from decimal import Decimal
 
 from simulated_annealing.instance_parser import InstanceData
 
@@ -48,19 +49,19 @@ class State:
             return False
 
     def get_cost(self):
-        return self.weight_sum - (self.cost_coef * self.max_weight) * (self.total_clauses - self.satisifed_clauses)
+        return Decimal(
+            (self.weight_sum * self.cost_coef) + (self.satisifed_clauses * (1 - self.cost_coef))
+        ) / Decimal(
+            (self.instance_data.max_w_sum * self.cost_coef) + (len(self.instance_data.clauses) * (1 - self.cost_coef))
+        )
 
-    def var_from_unsatisfied_clause(self):
-        """
-        :return: random variable from an unsatisfied clause
-                 - this variable will be then flipped to create a neighbouring state
-        """
-        rand_unsat_clause = self.random_unsatisfied_clause()
-        return abs(random.choice(rand_unsat_clause)) - 1  # position in list
+    def get_var_from_unsatisfied_clause(self):
+        random_unsatisfied_clause = self.get_random_unsatisfied_clause()
+        return abs(random.choice(random_unsatisfied_clause)) - 1
 
-    def random_unsatisfied_clause(self):
-        unsat_clauses = [clause for clause in self.instance_data.clauses if not self.is_clause_satisfied(clause)]
-        return random.choice(unsat_clauses)
+    def get_random_unsatisfied_clause(self):
+        unsatisfied_clauses = [clause for clause in self.instance_data.clauses if not self.is_clause_satisfied(clause)]
+        return random.choice(unsatisfied_clauses)
 
     def relative_error(self):
         return 1 - self.satisifed_clauses/len(self.instance_data.clauses)

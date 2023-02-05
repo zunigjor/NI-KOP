@@ -31,13 +31,6 @@ def success_rate(state):
     return state.satisifed_clauses/state.total_clauses
 
 
-def print_iteration(iteration, temperature, satisfied_clauses):
-    print("*"*40)
-    print("Iteration number: " + str(iteration))
-    print("Temperature: " + str(temperature))
-    print("Satisfied clauses: " + str(satisfied_clauses))
-
-
 def cool(temperature, cooling_coefficient):
     return temperature * cooling_coefficient
 
@@ -47,10 +40,6 @@ def frozen(temperature, min_temperature):
 
 
 def solution_exists(state):
-    """
-    :param state: one possible solution - State class instance
-    :return: True if all clauses from defined problem are satisfiable with variable setting of state
-    """
     return all(state.is_clause_satisfiable(clause) for clause in state.sat.clauses)
 
 
@@ -71,7 +60,7 @@ def get_neighbour(state, temperature):
 def get_random_neighbour(state):
     new_state = State(copy.deepcopy(state.bitmap), copy.deepcopy(state.instance_data), copy.deepcopy(state.cost_coef))
     if not new_state.satisifed_clauses == len(new_state.instance_data.clauses):
-        var_to_change = new_state.var_from_unsatisfied_clause()
+        var_to_change = new_state.get_var_from_unsatisfied_clause()
     else:
         var_to_change = random.randint(0, len(new_state.bitmap) - 1)
     new_state.bitmap[var_to_change] = int(not (new_state.bitmap[var_to_change]))
