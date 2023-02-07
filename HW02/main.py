@@ -35,7 +35,7 @@ def is_solution_optimal(solution, optimum):
     return solution.weight_sum == optimum[solution.instance_data.instance_name].weights
 
 
-def run_sim(params_function, whitebox=False):
+def run_sim(params_function, cost_function, whitebox=False):
     # Create folders
     run_name = params_function.__name__
     rm_r(f"results/{run_name}")
@@ -65,8 +65,6 @@ def run_sim(params_function, whitebox=False):
         wufX_X_X_opt_dats.sort()
         wufX_X_X_dir = list(set(wufX_X_dir) - set(wufX_X_X_opt_dats))
         wufX_X_X_dir.sort()
-        # metrics
-        succ = []
         results = pd.DataFrame(columns=['instance',
                                         'init_temperature',
                                         'min_temperature',
@@ -90,6 +88,7 @@ def run_sim(params_function, whitebox=False):
             optimal_rate = 0
             is_solution_rate = 0
             solutions = []
+            succ = []
             # iterate ./instance/wufX-X/wufX-X-X := wuf20-01, wuf20-02, wuf20-03 ...
             for j in range(10) if whitebox else range(100):
                 instance_name = wufX_X_X_dir[i][0:6] + "0" + str(j + 1)
@@ -104,7 +103,7 @@ def run_sim(params_function, whitebox=False):
                     # parameters
                     temperature, equilibrium, min_temperature, cooling_coef, cost_coef = params_function(instance_data)
                     # get init state
-                    init_state = State(get_random_bitmap(len(instance_data.weights)), instance_data, cost_coef)
+                    init_state = State(get_random_bitmap(len(instance_data.weights)), instance_data, cost_coef, cost_function)
                     # simulate annealing
                     solution, fitness, weights, sat_clauses, success, best_states = simulated_annealing(init_state,
                                                                                                         equilibrium,
@@ -140,14 +139,19 @@ def run_sim(params_function, whitebox=False):
                     instance_took = instance_took + f".{str(instance_elapsed_took.microseconds)[:1]}"
                     instance_elapsed_since_start = instance_end - start_time
                     instance_since_start = "%02d:%02d:%02d:%02d" % (instance_elapsed_since_start.days, instance_elapsed_since_start.seconds // 3600, instance_elapsed_since_start.seconds // 60 % 60, instance_elapsed_since_start.seconds % 60)
-                    print(f"{run_name} {wufX_X_X_dir[i]} {str(instance_name)}, {str(k+1)}, sol: {str(is_solution)[0]}, opt: {str(optimal)[0]}, took: {instance_took}, since_start: {instance_since_start}")
+                    print(f"{run_name}, {wufX_X_X_dir[i]}, {str(instance_name)}, {str(k+1)}, s: {str(is_solution)[0]}, o: {str(optimal)[0]}, {instance_took}, {instance_since_start}")
                     # plot first run
                     if k == 0:
-                        plot_fitnesses(plots_output_path, fitnesses, instance_name, weights, sat_clauses, best_states)
+                        plot_fitnesses(plots_output_path, fitnesses, f"{wufX_X_X_dir[i]}{instance_name[5:]}", weights, sat_clauses, best_states)
             # Print and save instanceset results
-            print(f"{'*'*40}\n{run_name}, {wufX_X_X_dir[i]}, avg. sat. clauses: {sum(succ) / len(succ)}, optimum reached: {optimal_rate / len(solutions)}, solutions rate: {is_solution_rate / len(solutions)}\n{'*'*40}")
+            str_stars = "*"*100
+            str_run_identification = f"{run_name}, {wufX_X_X_dir[i]}, "
+            str_success_rate = f"{sum(succ)}/{len(succ)}={sum(succ)/len(succ)}, "
+            str_solution_rate = f"s: {is_solution_rate}/{len(solutions)}={is_solution_rate/len(solutions)}, "
+            str_optimum_rate = f"o: {optimal_rate}/{len(solutions)}={optimal_rate/len(solutions)}"
+            print(f"{str_stars}\n{str_run_identification}{str_success_rate}{str_solution_rate}{str_optimum_rate}\n{str_stars}")
             with open("results/stats.csv", 'a') as out_file:
-                out_file.write(f"{run_name}, {wufX_X_X_dir[i]}, {sum(succ) / len(succ)}, {optimal_rate / len(solutions)}, {is_solution_rate / len(solutions)}\n")
+                out_file.write(f"{run_name}, {wufX_X_X_dir[i]}, {len(succ)}, {sum(succ)}, {sum(succ) / len(succ)}, {is_solution_rate}, {is_solution_rate / len(solutions)}, {optimal_rate}, {optimal_rate / len(solutions)}\n")
             results.to_csv(f"{csv_output_path}{str(wufX_X_X_dir[i])}_{run_name}.csv")
     # Measure total time
     end_time = datetime.now()
@@ -164,21 +168,21 @@ if __name__ == '__main__':
     except:
         pass
     with open("results/stats.csv", 'w') as out_file:
-        out_file.write("Name, Instances, Satisfied clauses, Optimums reached, Solutions found\n")
+        out_file.write("name, instances, runs, satisfied_clauses, satisfied_clauses_rate, solutions_found, solutions_found rate, optimums_reached, optimums_reached_rate\n")
 
-    w_0 = Process(target=run_sim, args=(box.whitebox_0, True))
-    w_1 = Process(target=run_sim, args=(box.whitebox_1, True))
-    w_2 = Process(target=run_sim, args=(box.whitebox_2, True))
-    w_3 = Process(target=run_sim, args=(box.whitebox_3, True))
-    w_4 = Process(target=run_sim, args=(box.whitebox_4, True))
-    w_5 = Process(target=run_sim, args=(box.whitebox_5, True))
-    w_6 = Process(target=run_sim, args=(box.whitebox_6, True))
-    w_7 = Process(target=run_sim, args=(box.whitebox_7, True))
-    w_8 = Process(target=run_sim, args=(box.whitebox_8, True))
-    w_9 = Process(target=run_sim, args=(box.whitebox_9, True))
-    w_10 = Process(target=run_sim, args=(box.whitebox_10, True))
-    w_11 = Process(target=run_sim, args=(box.whitebox_11, True))
-    blackbox = Process(target=run_sim, args=(box.blackbox, False))
+    w_0 = Process(target=run_sim, args=(box.whitebox_0, box.cost_function_0, True))
+    w_1 = Process(target=run_sim, args=(box.whitebox_1, box.cost_function_0, True))
+    w_2 = Process(target=run_sim, args=(box.whitebox_2, box.cost_function_0, True))
+    w_3 = Process(target=run_sim, args=(box.whitebox_3, box.cost_function_0, True))
+    w_4 = Process(target=run_sim, args=(box.whitebox_4, box.cost_function_0, True))
+    w_5 = Process(target=run_sim, args=(box.whitebox_5, box.cost_function_0, True))
+    w_6 = Process(target=run_sim, args=(box.whitebox_6, box.cost_function_0, True))
+    w_7 = Process(target=run_sim, args=(box.whitebox_7, box.cost_function_0, True))
+    w_8 = Process(target=run_sim, args=(box.whitebox_8, box.cost_function_0, True))
+    w_9 = Process(target=run_sim, args=(box.whitebox_9, box.cost_function_1, True))
+    w_10 = Process(target=run_sim, args=(box.whitebox_10, box.cost_function_1, True))
+    w_11 = Process(target=run_sim, args=(box.whitebox_11, box.cost_function_1, True))
+    blackbox = Process(target=run_sim, args=(box.blackbox, box.cost_function_1, False))
 
     w_0.start()
     w_1.start()

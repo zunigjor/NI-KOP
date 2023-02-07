@@ -10,10 +10,11 @@ def get_random_bitmap(lenght):
 
 
 class State:
-    def __init__(self, bitmap, instance_data, cost_coef):
+    def __init__(self, bitmap, instance_data, cost_coef, cost_function):
         self.bitmap = bitmap
         self.instance_data: InstanceData = instance_data
         self.cost_coef = cost_coef
+        self.cost_function = cost_function
         self.max_weight = max(self.instance_data.weights)
         self.weight_sum = self.get_weight_sum()
         self.total_clauses = len(self.instance_data.clauses)
@@ -49,11 +50,7 @@ class State:
             return False
 
     def get_cost(self):
-        return Decimal(
-            (self.weight_sum * self.cost_coef) + (self.satisifed_clauses * (1 - self.cost_coef))
-        ) / Decimal(
-            (self.instance_data.max_w_sum * self.cost_coef) + (len(self.instance_data.clauses) * (1 - self.cost_coef))
-        )
+        return self.cost_function(self)
 
     def get_var_from_unsatisfied_clause(self):
         random_unsatisfied_clause = self.get_random_unsatisfied_clause()

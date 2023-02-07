@@ -11,7 +11,7 @@ def plot_fitnesses(output_path, fitness_list, instance_name, weights, satc, solu
     a[0].plot(best_costs, label="best state")
     a[0].set_xlabel('State number')
     a[0].set_ylabel('Fitness')
-    filename = output_path + str(instance_name) + '_' + str(time.time()) + '.png'
+    filename = output_path + str(instance_name) + '.png'
     a[1].plot(weights)
     a[1].set_xlabel('State number')
     a[1].set_ylabel('Weights')

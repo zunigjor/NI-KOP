@@ -1,10 +1,9 @@
 import math
+from decimal import Decimal
 ########################################################################################################################
-"""
-Using:
-def get_cost(self):
-    return self.weight_sum - (self.cost_coef * self.max_weight) * (self.total_clauses - self.satisifed_clauses)
-"""
+# Using:
+def cost_function_0(state):
+    return state.weight_sum - (state.cost_coef * state.max_weight) * (state.total_clauses - state.satisifed_clauses)
 ########################################################################################################################
 def whitebox_0(instance_data):
     temperature = 10000  # 10 000
@@ -80,13 +79,14 @@ def whitebox_8(instance_data):
 ########################################################################################################################
 """
 Time to take a step in a new direction with new cost function:
-def get_cost(self):
-    return Decimal(
-        (self.weight_sum * self.cost_coef) + (self.satisifed_clauses * (1 - self.cost_coef))
-    ) / Decimal(
-        (self.instance_data.max_w_sum * self.cost_coef) + (len(self.instance_data.clauses) * (1 - self.cost_coef))
-    )
 """
+def cost_function_1(state):
+    return Decimal(
+        (state.weight_sum * state.cost_coef) + (state.satisifed_clauses * (1 - state.cost_coef))
+    ) / Decimal(
+        (state.instance_data.max_w_sum * state.cost_coef) + (len(state.instance_data.clauses) * (1 - state.cost_coef))
+    )
+
 ########################################################################################################################
 def whitebox_9(instance_data):
     temperature = math.pow(10, len(instance_data.weights)/10)

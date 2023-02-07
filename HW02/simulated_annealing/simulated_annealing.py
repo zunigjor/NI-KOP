@@ -9,7 +9,7 @@ from decimal import Decimal
 def simulated_annealing(init_state, equilibrium, init_temperature, cooling_coefficient, min_temperature):
     state = init_state
     temperature = init_temperature
-    best_state = State(copy.deepcopy(state.bitmap), copy.deepcopy(state.instance_data), copy.deepcopy(state.cost_coef))
+    best_state = State(copy.deepcopy(state.bitmap), copy.deepcopy(state.instance_data), copy.deepcopy(state.cost_coef), copy.deepcopy(state.cost_function))
     fitness = [best_state.cost]
     weights = [best_state.weight_sum]
     sat_clauses = [best_state.get_satisfied_clauses()]
@@ -58,7 +58,7 @@ def get_neighbour(state, temperature):
 
 
 def get_random_neighbour(state):
-    new_state = State(copy.deepcopy(state.bitmap), copy.deepcopy(state.instance_data), copy.deepcopy(state.cost_coef))
+    new_state = State(copy.deepcopy(state.bitmap), copy.deepcopy(state.instance_data), copy.deepcopy(state.cost_coef), copy.deepcopy(state.cost_function))
     if not new_state.satisifed_clauses == len(new_state.instance_data.clauses):
         var_to_change = new_state.get_var_from_unsatisfied_clause()
     else:
